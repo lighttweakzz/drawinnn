@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="bg">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Рисувай и познавай</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700&display=swap" rel="stylesheet">
+<style>
+:root{--blue:#2540d9;--paper:#fffdf7;--ink:#14162b;--lemon:#ffd84a;--mint:#3ddc97}
+*{box-sizing:border-box}
+body{margin:0;min-height:100dvh;background:var(--blue);color:#fff;font:17px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;justify-content:center;padding:20px 14px}
+main{width:100%;max-width:760px;display:flex;flex-direction:column;gap:14px}
+h1,.big{font-family:Unbounded,system-ui,sans-serif;font-weight:700;margin:0}
+h1{font-size:clamp(1.7rem,7vw,2.8rem);line-height:1.05}
+p{margin:0 0 12px}
+button,input{font:inherit;color:var(--ink);border:2px solid var(--ink);border-radius:999px;padding:10px 20px;background:var(--paper)}
+button{cursor:pointer;font-weight:600;box-shadow:3px 3px 0 var(--ink)}
+button:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--ink)}
+button.y{background:var(--lemon)}
+button:disabled,input:disabled{opacity:.5;cursor:default}
+:focus-visible{outline:3px solid #fff;outline-offset:3px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+#code{width:7.5em;text-align:center;text-transform:uppercase;letter-spacing:.25em;font-weight:700}
+#gi{flex:1;min-width:140px}
+input[type=range]{flex:1;min-width:100px;padding:0;border:0;background:none;accent-color:var(--blue)}
+#msg{min-height:1.5em;margin:0}
+#st{font-size:1.05rem;margin-bottom:10px}
+.paper{background:var(--paper);border:2px solid var(--ink);border-radius:14px;box-shadow:6px 6px 0 var(--ink);overflow:hidden}
+canvas{display:block;width:100%;aspect-ratio:4/3;touch-action:none}
+.bar{padding:10px 12px;border-top:2px solid var(--ink)}
+.sw{width:34px;height:34px;padding:0;border-radius:50%;box-shadow:none;font-size:16px;line-height:1}
+.sw.on{outline:3px solid var(--blue);outline-offset:2px}
+.chip{background:var(--paper);color:var(--ink);border:2px solid var(--ink);border-radius:999px;padding:3px 12px;font-weight:600}
+.chip.d{background:var(--lemon)}
+.chip.k{background:var(--mint)}
+#log{max-height:150px;overflow:auto}
+#log div{padding:3px 0;overflow-wrap:anywhere}
+#log .k{color:var(--lemon);font-weight:700}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+  <h1>Рисувай и познавай</h1>
+
+  <section id="lobby">
+    <p>Един играч получава дума и я рисува, останалите я познават. Играйте от няколко устройства.</p>
+    <div class="row"><input id="nm" maxlength="12" placeholder="Вашето име" aria-label="Име"></div>
+    <div class="row" style="margin-top:12px"><button class="y" id="mk">Създай стая</button></div>
+    <p style="margin:18px 0 8px">Или влезте с код:</p>
+    <div class="row">
+      <input id="code" maxlength="4" placeholder="КОД" autocomplete="off" aria-label="Код на стаята">
+      <button id="jn">Влез</button>
+    </div>
+  </section>
+
+  <section id="app" hidden>
+    <div class="row" style="justify-content:space-between;margin-bottom:12px">
+      <span class="big" style="font-size:1.4rem" id="room"></span>
+      <button id="cp">Копирай линк</button>
+    </div>
+    <p id="st" class="big"></p>
+    <div class="paper">
+      <canvas id="cv" width="800" height="600"></canvas>
+      <div class="bar row" id="tools" hidden>
+        <span id="sw" class="row" style="gap:8px"></span>
+        <input type="range" id="sz" min="2" max="40" value="6" aria-label="Дебелина на четката">
+        <button id="clr">Изчисти</button>
+      </div>
+    </div>
+    <div class="row" id="pl" style="margin:14px 0"></div>
+    <div class="row">
+      <input id="gi" maxlength="40" placeholder="Какво е това?" autocomplete="off" aria-label="Вашият отговор">
+      <button class="y" id="gb">Изпрати</button>
+    </div>
+    <div id="log"></div>
+    <div class="row" id="ctl" style="margin-top:12px"></div>
+  </section>
+
+  <p id="msg" role="status"></p>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+const WORDS=['котка','куче','слънце','къща','дърво','кола','самолет','риба','цвете','луна','звезда','мост','часовник','чадър','ябълка','банан','пица','сладолед','колело','книга','телефон','очила','шапка','обувка','ключ','свещ','сърце','планина','облак','дъга','змия','жаба','слон','жираф','пингвин','пеперуда','робот','замък','кораб','влак','корона','дракон','китара','торта'];
+const $=id=>document.getElementById(id), cv=$('cv'), cx=cv.getContext('2d'), W=800, H=600;
+const P='#fffdf7', A='ABCDEFGHJKLMNPQRSTUVWXYZ23456789', rd=v=>Math.round(v*10)/10;
+let peer, conns=[], isHost=false, me='', color='#14162b', last=null, myWord='';
+// Състояние на играта (G) се пази само при домакина и се разпраща на всички при всяка промяна
+let G={ph:'lobby',pl:[],dr:null,tm:0,hint:'',rv:'',gu:[]}, word='', order=[], r=0, tm, nt;
+const msg=t=>$('msg').textContent=t;
+const clr=()=>{cx.fillStyle=P;cx.fillRect(0,0,W,H)};
+clr(); cx.lineCap=cx.lineJoin='round';
+const seg=s=>{cx.strokeStyle=s.c;cx.lineWidth=s.w;cx.beginPath();cx.moveTo(s.a,s.b);cx.lineTo(s.x,s.y);cx.stroke()};
+const send=(m,except)=>conns.forEach(c=>c!==except&&c.open&&c.send(m));
+const name=()=>$('nm').value.trim().slice(0,12)||'Играч'+(10+Math.random()*90|0);
+const dm=()=>G.ph==='play'&&G.dr===me; // аз ли съм рисуващият
+
+function log(n,x,ok){
+  const d=document.createElement('div');d.textContent=n+': '+x;if(ok)d.className='k';
+  $('log').prepend(d);while($('log').children.length>30)$('log').lastChild.remove();
+}
+function chat(n,x,ok){log(n,x,ok);send({t:'c',n,x,ok})}
+const bc=()=>{send({t:'G',g:G});render()};
+
+function render(){
+  const g=G,pl=g.pl,d=pl.find(p=>p.id===g.dr),top=[...pl].sort((a,b)=>b.s-a.s);
+  $('st').textContent=g.ph==='lobby'?'Чакаме играчи. Вече сте '+pl.length+'.':
+    g.ph==='play'?(dm()?'Нарисувайте: '+myWord:(d?d.n:'')+' рисува: '+g.hint)+' ('+g.tm+' с)':
+    g.ph==='rev'?'Думата беше „'+g.rv+'“.':
+    'Край на играта! Победител: '+(top[0]?top[0].n:'')+'.';
+  $('tools').hidden=!dm();
+  $('gi').disabled=$('gb').disabled=!(g.ph==='play'&&!dm()&&!g.gu.includes(me));
+  $('pl').replaceChildren(...top.map(p=>{
+    const s=document.createElement('span');
+    s.className='chip'+(p.id===g.dr&&g.ph==='play'?' d':g.gu.includes(p.id)?' k':'');
+    s.textContent=p.n+': '+p.s;return s}));
+  $('ctl').replaceChildren();
+  if(isHost&&(g.ph==='lobby'||g.ph==='end')){
+    const b=document.createElement('button');b.className='y';b.textContent=g.ph==='end'?'Нова игра':'Старт';
+    b.disabled=pl.length<2;b.onclick=startGame;$('ctl').append(b);
+  }
+}
+
+// ---------- Логика на домакина ----------
+function startGame(){
+  clearInterval(tm);clearTimeout(nt);
+  G.pl.forEach(p=>p.s=0);order=G.pl.map(p=>p.id);r=-1;nextRound();
+}
+function nextRound(){
+  do r++; while(r<order.length&&!G.pl.some(p=>p.id===order[r]));
+  if(r>=order.length){G.ph='end';G.dr=null;return bc()}
+  word=WORDS[Math.random()*WORDS.length|0];
+  Object.assign(G,{ph:'play',dr:order[r],tm:60,gu:[],rv:'',hint:[...word].map(()=>'_').join(' ')});
+  clr();send({t:'x'});
+  if(G.dr===me)myWord=word;
+  else{const c=conns.find(c=>c.peer===G.dr);if(c)c.send({t:'w',w:word})} // думата отива САМО при рисуващия
+  bc();
+  clearInterval(tm);tm=setInterval(()=>{G.tm--;G.tm<=0?endRound():bc()},1000);
+}
+function endRound(){clearInterval(tm);G.ph='rev';G.rv=word;bc();nt=setTimeout(nextRound,4000)}
+function guess(id,x){
+  const p=G.pl.find(q=>q.id===id);
+  if(!p||G.ph!=='play'||id===G.dr||G.gu.includes(id))return;
+  x=String(x).trim().slice(0,40);if(!x)return;
+  if(x.toLowerCase()!==word.toLowerCase())return chat(p.n,x);
+  p.s+=10+G.tm;(G.pl.find(q=>q.id===G.dr)||{s:0}).s+=15;G.gu.push(id);
+  chat(p.n,'позна думата!',1);
+  G.pl.every(q=>q.id===G.dr||G.gu.includes(q.id))?endRound():bc();
+}
+function hostMsg(m,c){
+  if(m.t==='j'){
+    if(!G.pl.some(p=>p.id===c.peer))G.pl.push({id:c.peer,n:String(m.n).slice(0,12)||'Играч',s:0});
+    bc();
+  }else if(m.t==='g')guess(c.peer,m.x);
+  else if((m.t==='s'||m.t==='x')&&G.ph==='play'&&c.peer===G.dr){ // приемаме рисунка само от рисуващия
+    m.t==='s'?seg(m):clr();send(m,c); // и я препращаме на останалите
+  }
+}
+function left(c){
+  conns=conns.filter(x=>x!==c);G.pl=G.pl.filter(p=>p.id!==c.peer);
+  if(G.ph!=='lobby'&&G.pl.length<2){clearInterval(tm);clearTimeout(nt);G.ph='lobby';return bc()}
+  if(G.ph==='play'&&(c.peer===G.dr||G.pl.every(q=>q.id===G.dr||G.gu.includes(q.id))))return endRound();
+  bc();
+}
+
+// ---------- Връзка ----------
+function enter(code,t){
+  $('lobby').hidden=true;$('app').hidden=false;$('room').textContent=code;
+  history.replaceState(null,'','#'+code);msg(t);render();
+}
+const keepAlive=p=>p.on('disconnected',()=>setTimeout(()=>{if(!p.destroyed&&p.disconnected)p.reconnect()},1000));
+
+function mk(){ // ДОМАКИН
+  const code=Array.from({length:4},()=>A[Math.random()*A.length|0]).join('');
+  const p=peer=new Peer('bgpic-'+code);
+  p.on('open',id=>{isHost=true;me=id;G.pl=[{id,n:name(),s:0}];enter(code,'Споделете кода или линка. Не затваряйте страницата, вие сте домакин.')});
+  p.on('connection',c=>{
+    c.on('open',()=>{conns.push(c);c.send({t:'i',d:cv.toDataURL()})});
+    c.on('data',m=>hostMsg(m,c));
+    c.on('close',()=>left(c));
+  });
+  keepAlive(p);
+  p.on('error',e=>{if(e.type==='unavailable-id'){p.destroy();mk()}else msg('Грешка: '+e.type)});
+}
+function join(code){ // КЛИЕНТ
+  code=code.trim().toUpperCase();
+  if(code.length!==4)return msg('Кодът е от 4 символа.');
+  msg('Свързване…');
+  const p=peer=new Peer();
+  p.on('open',id=>{
+    me=id;const c=p.connect('bgpic-'+code);conns=[c];
+    c.on('open',()=>{c.send({t:'j',n:name()});enter(code,'')});
+    c.on('data',m=>{
+      if(m.t==='G'){G=m.g;render()}
+      else if(m.t==='w')myWord=m.w;
+      else if(m.t==='s')seg(m);
+      else if(m.t==='x')clr();
+      else if(m.t==='c')log(m.n,m.x,m.ok);
+      else if(m.t==='i'){const i=new Image();i.onload=()=>cx.drawImage(i,0,0);i.src=m.d}
+    });
+    c.on('close',()=>msg('Връзката с домакина прекъсна. Презаредете страницата.'));
+  });
+  keepAlive(p);
+  p.on('error',e=>{const na=e.type==='peer-unavailable';msg(na?'Няма стая с този код.':'Грешка: '+e.type);if(na)p.destroy()});
+}
+
+// ---------- Рисуване (само за рисуващия) ----------
+const pos=e=>{const b=cv.getBoundingClientRect();return[rd((e.clientX-b.left)*W/b.width),rd((e.clientY-b.top)*H/b.height)]};
+const line=(a,b,x,y)=>{const s={t:'s',a,b,x,y,c:color,w:+$('sz').value};seg(s);send(s)};
+cv.onpointerdown=e=>{if(!dm())return;cv.setPointerCapture(e.pointerId);last=pos(e);line(last[0],last[1],last[0]+.1,last[1])};
+cv.onpointermove=e=>{if(!last||!dm())return;const q=pos(e);line(last[0],last[1],q[0],q[1]);last=q};
+cv.onpointerup=cv.onpointercancel=()=>last=null;
+
+['#14162b','#e5383b','#ff9f1c','#2ec4b6','#2540d9','#8338ec',P].forEach(c=>{
+  const b=document.createElement('button');b.className='sw';b.style.background=c;
+  b.title=c===P?'Гума':c;if(c===P)b.textContent='🧽';
+  b.onclick=()=>{color=c;document.querySelectorAll('.sw').forEach(x=>x.classList.toggle('on',x===b))};
+  $('sw').append(b);
+});
+$('sw').firstChild.click();
+$('clr').onclick=()=>{clr();send({t:'x'})};
+
+// ---------- Отговори и бутони ----------
+const sendGuess=()=>{const x=$('gi').value.trim();if(!x)return;$('gi').value='';isHost?guess(me,x):send({t:'g',x})};
+$('gb').onclick=sendGuess;
+$('gi').onkeydown=e=>e.key==='Enter'&&sendGuess();
+$('cp').onclick=()=>(navigator.clipboard?navigator.clipboard.writeText(location.href):Promise.reject())
+  .then(()=>msg('Линкът е копиран.'),()=>prompt('Копирайте линка:',location.href));
+$('mk').onclick=mk;
+$('jn').onclick=()=>join($('code').value);
+$('code').onkeydown=e=>e.key==='Enter'&&join(e.target.value);
+const h=location.hash.slice(1);if(h)$('code').value=h; // линк с #КОД попълва кода, играчът само въвежда име
+</script>
+</body>
+</html>
